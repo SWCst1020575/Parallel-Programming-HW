@@ -1,9 +1,9 @@
 extern int w, h, maxRow;
 #include <boost/functional/hash.hpp>
+#include <list>
 #include <unordered_set>
 #include <utility>
 #include <vector>
-#include <list>
 typedef boost::hash<std::pair<int, int>> PairHash;
 
 class Step {
@@ -13,6 +13,7 @@ class Step {
     Step(Step *);
     friend bool operator>(const Step &l, const Step &r) { return l.predictCost > r.predictCost; };
     friend bool operator<(const Step &l, const Step &r) { return l.predictCost < r.predictCost; };
+    bool operator()(const Step &l, const Step &r) { return l.predictCost > r.predictCost; };
     friend bool operator==(const Step &l, const Step &r) {
         if (l.playerPosX != r.playerPosX || l.playerPosY != r.playerPosY)
             return false;
@@ -28,5 +29,11 @@ class Step {
     int predictCost;
 };
 struct stepHash {
-    std::size_t operator()(Step const &)const;
+    std::size_t operator()(Step const &) const;
+};
+class stepCompare {
+   public:
+    bool operator()(const Step &a, const Step &b) {
+        return a.predictCost > b.predictCost;
+    }
 };

@@ -51,7 +51,6 @@ class Sokoban {
     void printOpen();
     void findLeastCost();
     bool solve();
-
    private:
     char **map;
     int totalTarget, totalBox;
@@ -60,6 +59,7 @@ class Sokoban {
     std::unordered_set<std::pair<int, int>, PairHash> targetPos;
     std::unordered_set<std::pair<int, int>, PairHash> playOnlyPos;
     std::unordered_set<Step, stepHash> closed;
-    std::priority_queue<Step *, std::vector<Step *>, std::greater<Step *>> open;
+    std::unordered_set<Step, stepHash> openSave;
+    std::priority_queue<Step *, std::vector<Step *>, stepCompare> open;
     
 };

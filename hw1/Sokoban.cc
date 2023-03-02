@@ -19,7 +19,7 @@ Sokoban::Sokoban(int &argc, char *argv[], std::ifstream &file) {
         }
         for (int i = 0; i < w; i++) {
             map[row][i] = s[i];
-            if (s[i] == BoxOnNormal)
+            if (s[i] == BoxOnNormal || s[i] == BoxOnTarget)
                 currentStep->boxPos.emplace(std::make_pair(i, row));
             if (s[i] == Target || s[i] == PlayerOnTarget || s[i] == BoxOnTarget)
                 targetPos.emplace(std::make_pair(i, row));
@@ -52,7 +52,7 @@ Sokoban::~Sokoban() {
 }
 bool Sokoban::isComplete(Step &nowStep) {
     for (auto i : nowStep.boxPos)
-        if (map[i.second][i.first] != Target || map[i.second][i.first] != BoxOnTarget || map[i.second][i.first] != PlayerOnTarget)
+        if (map[i.second][i.first] != Target && map[i.second][i.first] != BoxOnTarget && map[i.second][i.first] != PlayerOnTarget)
             return false;
     return true;
 }
@@ -67,7 +67,7 @@ bool Sokoban::isDead(Step &nowStep) {
             down = true;
         if (map[i.second][i.first + 1] == Wall || nowStep.boxPos.find(std::make_pair(i.first + 1, i.second)) != nowStep.boxPos.end())
             right = true;
-        if ((up && left) || (up && right) || (down && left) || (down && right))
+        if (((up && left) || (up && right) || (down && left) || (down && right)) && (map[i.second][i.first] != Target && map[i.second][i.first] != BoxOnTarget))
             return true;
     }
     return false;
@@ -124,7 +124,6 @@ bool Sokoban::moveBox(Step &nowStep, char dir, std::unordered_set<std::pair<int,
         return false;
     nowStep.boxPos.erase(it);
     nowStep.boxPos.emplace(newBoxPos);
-    DebugLog("Move box " << dir << " !!");
     return true;
 }
 void Sokoban::computeAstarFunction(Step &current) {
@@ -140,17 +139,23 @@ void Sokoban::computeAstarFunction(Step &current) {
     current.predictCost = temp;
 }
 void Sokoban::findLeastCost() {
+    delete currentStep;
     currentStep = open.top();
     open.pop();
 }
 void Sokoban::printOpen() {
+    DebugLog("PrintOpen Function");
     auto pq = open;
     while (!pq.empty()) {
         std::cout << pq.top()->predictCost << " ";
         pq.pop();
     }
-    std::cout << "\n"
-              << open.size() << "\n";
+    DebugLog("");
+    DebugLog(open.size());
+    DebugLog("---------Box---------");
+    for (auto i : currentStep->boxPos)
+        DebugLog(i.first << " " << i.second);
+    DebugLog("---------Box---------");
 }
 bool Sokoban::solve() {
     if (isComplete(*currentStep))
@@ -160,7 +165,6 @@ bool Sokoban::solve() {
     closed.emplace(*currentStep);
     std::list<Step *> dirSave;
     int count = 0;
-    DebugLog(currentStep->playerPosX << " " << currentStep->playerPosY);
     while (!isComplete(*currentStep)) {
         auto upStep = new Step(*currentStep);
         if (move(*upStep, 'W') && !isDead(*upStep))
@@ -186,7 +190,10 @@ bool Sokoban::solve() {
         for (auto it : dirSave)
             computeAstarFunction(*it);
         while (!dirSave.empty()) {
-            open.emplace(dirSave.front());
+            if (openSave.find(dirSave.front()) == openSave.end()) {
+                openSave.emplace(dirSave.front());
+                open.emplace(dirSave.front());
+            }
             dirSave.pop_front();
         }
         if (open.size() > 0) {
@@ -195,13 +202,14 @@ bool Sokoban::solve() {
                 findLeastCost();
             closed.emplace(*currentStep);
         } else
-            return false;  // no answer
-        printOpen();
-        for (auto i : currentStep->stepHistory)
-            std::cout << i << " | ";
-        int n;
-        std::cin >> n;
+            return false;
+        // no answer
+        /*for (auto i : currentStep->stepHistory)
+            std::cout << i << " | ";*/
+        // DebugLog(" Now:(" << currentStep->playerPosX << "," << currentStep->playerPosY << ")");
+        count++;
     }
+
     for (auto i : currentStep->stepHistory)
         std::cout << i;
     std::cout << "\n";
