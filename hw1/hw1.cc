@@ -11,8 +11,7 @@ int main(int argc, char *argv[]) {
         return 0;
     }
     Sokoban sokoban(argc, argv, file);
-    PrintSokoban(sokoban);
-
+    //PrintSokoban(sokoban);
     if (sokoban.solve())
         DebugLog("Find path!");
 }

@@ -103,7 +103,7 @@ def main(filename: str):
     A state is a tuple of (game map, player location).
     Each game state is a vertex on the graph.
     And there exists a edge from vertices v -> u if there
-    exists a move that changes the game state from v to u.
+    exists a move that changes the game state from v to u../
     Here, BFS is used on the state graph, from the initial state,
     to obtain the solution.
 
@@ -117,15 +117,19 @@ def main(filename: str):
     state = loadstate(filename)
     visited = {state: ''}
     todo = collections.deque([state])
+    count = 0
     while todo:
+        count+=1
         m, (y, x) = currstate = todo.popleft()
         if is_solved(m):
+            print(f"Step: {count}")
             return visited[currstate]
         for key, (dy, dx) in DYDX.items():
             if newstate := try_move(m, y, x, dy, dx):
                 if newstate not in visited:
                     visited[newstate] = visited[currstate] + key
                     todo.append(newstate)
+    print(f"Step: {count}")
     raise Oops('no solution')
 
 

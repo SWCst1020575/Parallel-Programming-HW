@@ -44,13 +44,14 @@ class Sokoban {
     ~Sokoban();
     bool isComplete(Step &);
     bool isDead(Step &);
-    bool move(Step &, char);
-    bool moveBox(Step &, char, std::unordered_set<std::pair<int, int>>::iterator &);
+    Step *move(Step &, char);
+    bool moveBox(Step *, char, std::unordered_set<std::pair<int, int>>::iterator &);
     char *operator[](int index) { return map[index]; }
     void computeAstarFunction(Step &);
     void printOpen();
     void findLeastCost();
     bool solve();
+
    private:
     char **map;
     int totalTarget, totalBox;
@@ -61,5 +62,4 @@ class Sokoban {
     std::unordered_set<Step, stepHash> closed;
     std::unordered_set<Step, stepHash> openSave;
     std::priority_queue<Step *, std::vector<Step *>, stepCompare> open;
-    
 };
