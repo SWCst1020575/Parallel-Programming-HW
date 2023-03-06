@@ -25,6 +25,7 @@
 #define PrintSokoban(x)
 #endif
 
+
 #include <boost/functional/hash.hpp>
 #include <fstream>
 #include <iostream>

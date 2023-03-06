@@ -95,15 +95,31 @@ Step *Sokoban::move(Step &nowStep, char dir) {
         return nullptr;
     if (map[newPlayerPos.second][newPlayerPos.first] == Wall)
         return nullptr;
-    auto newStep = new Step(nowStep);
+    Step *newStep;
+    auto boxIter = nowStep.boxPos.find(newPlayerPos);
+    if (boxIter != nowStep.boxPos.end()) {
+        if (moveBox(&nowStep, dir, boxIter)) {
+            newStep = new Step(nowStep);
+            newStep->boxPos.erase(newStep->boxPos.find(newPlayerPos));
+            if (dir == 'W')
+                newStep->boxPos.emplace(std::make_pair(newPlayerPos.first, newPlayerPos.second - 1));
+            else if (dir == 'A')
+                newStep->boxPos.emplace(std::make_pair(newPlayerPos.first - 1, newPlayerPos.second));
+            else if (dir == 'S')
+                newStep->boxPos.emplace(std::make_pair(newPlayerPos.first, newPlayerPos.second + 1));
+            else if (dir == 'D')
+                newStep->boxPos.emplace(std::make_pair(newPlayerPos.first + 1, newPlayerPos.second));
+            newStep->playerPosX = newPlayerPos.first;
+            newStep->playerPosY = newPlayerPos.second;
+            newStep->stepHistory.push_back(dir);
+            return newStep;
+        } else
+            return nullptr;
+    }
+    newStep = new Step(nowStep);
     newStep->playerPosX = newPlayerPos.first;
     newStep->playerPosY = newPlayerPos.second;
-    auto boxIter = newStep->boxPos.find(newPlayerPos);
-    if (boxIter != newStep->boxPos.end()) {
-        if (!moveBox(newStep, dir, boxIter))
-            return newStep;
-    }
-    nowStep.stepHistory.push_back(dir);
+    newStep->stepHistory.push_back(dir);
     return newStep;
 }
 bool Sokoban::moveBox(Step *nowStep, char dir, std::unordered_set<std::pair<int, int>>::iterator &it) {
@@ -124,10 +140,8 @@ bool Sokoban::moveBox(Step *nowStep, char dir, std::unordered_set<std::pair<int,
     }
     if (newBoxPos.first < 0 || newBoxPos.first > w || newBoxPos.second < 0 || newBoxPos.second > h)
         return false;
-    if (map[newBoxPos.second][newBoxPos.first] == Wall || nowStep->boxPos.find(newBoxPos) != nowStep->boxPos.end() || playOnlyPos.find(newBoxPos) != playOnlyPos.end())
+    if (map[newBoxPos.second][newBoxPos.first] == Wall || map[newBoxPos.second][newBoxPos.first] == PlayerOnly || map[newBoxPos.second][newBoxPos.first] == PlayerOnOnly || nowStep->boxPos.find(newBoxPos) != nowStep->boxPos.end())
         return false;
-    nowStep->boxPos.erase(it);
-    nowStep->boxPos.emplace(newBoxPos);
     return true;
 }
 void Sokoban::computeAstarFunction(Step &current) {
@@ -173,17 +187,18 @@ bool Sokoban::solve() {
     closed.emplace(*currentStep);
     std::list<Step *> dirSave;
     int count = 0;
+
     while (!isComplete(*currentStep)) {
-        auto upStep = move(*currentStep, 'W');
+        Step *upStep = move(*currentStep, 'W');
         if (upStep != nullptr && !isDead(*upStep))
             dirSave.push_back(upStep);
-        auto leftStep = move(*currentStep, 'A');
+        Step *leftStep = move(*currentStep, 'A');
         if (leftStep != nullptr && !isDead(*leftStep))
             dirSave.push_back(leftStep);
-        auto downStep = move(*currentStep, 'S');
+        Step *downStep = move(*currentStep, 'S');
         if (downStep != nullptr && !isDead(*downStep))
             dirSave.push_back(downStep);
-        auto rightStep = move(*currentStep, 'D');
+        Step *rightStep = move(*currentStep, 'D');
         if (rightStep != nullptr && !isDead(*rightStep))
             dirSave.push_back(rightStep);
 
