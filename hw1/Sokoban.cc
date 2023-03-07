@@ -33,7 +33,7 @@ Sokoban::Sokoban(int &argc, char *argv[], std::ifstream &file) {
                 totalTarget++;
             if (s[i] == BoxOnTarget)
                 boxOnTarget++;
-            if (s[i] == PlayerOnly || s[i] == PlayerOnNormal || s[i] == PlayerOnOnly || s[i] == PlayerOnTarget) {
+            if (s[i] == PlayerOnNormal || s[i] == PlayerOnOnly || s[i] == PlayerOnTarget) {
                 currentStep->playerPosX = i;
                 currentStep->playerPosY = row;
             }
@@ -62,6 +62,7 @@ bool Sokoban::isComplete(Step &nowStep) {
 bool Sokoban::isDead(Step &nowStep) {
     for (auto i : nowStep.boxPos) {
         bool up = false, left = false, down = false, right = false;  // true == obstacle
+        bool upBox = false, leftBox = false, downBox = false, rightBox = false;
         if (map[i.second - 1][i.first] == Wall)
             up = true;
         if (map[i.second][i.first - 1] == Wall)
@@ -70,7 +71,17 @@ bool Sokoban::isDead(Step &nowStep) {
             down = true;
         if (map[i.second][i.first + 1] == Wall)
             right = true;
-        if (((up && left) || (up && right) || (down && left) || (down && right)) && (map[i.second][i.first] != Target && map[i.second][i.first] != BoxOnTarget && map[i.second][i.first] != PlayerOnTarget))
+        if (nowStep.boxPos.find(std::make_pair(i.first, i.second - 1)) != nowStep.boxPos.end())
+            upBox = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first - 1, i.second)) != nowStep.boxPos.end())
+            leftBox = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first, i.second + 1)) != nowStep.boxPos.end())
+            downBox = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first + 1, i.second)) != nowStep.boxPos.end())
+            rightBox = true;
+        if (map[i.second][i.first] == Target || map[i.second][i.first] == BoxOnTarget || map[i.second][i.first] == PlayerOnTarget)
+            continue;
+        if ((up || down) && (left || right))
             return true;
     }
     return false;
@@ -144,11 +155,11 @@ bool Sokoban::moveBox(Step *nowStep, char dir, std::unordered_set<std::pair<int,
         return false;
     return true;
 }
-void Sokoban::computeAstarFunction(Step &current) {
+int Sokoban::heuristic(Step *current) {
     int leftBox = targetPos.size();
     int totalMinDis = 0;
-    for (auto i : current.boxPos) {
-        int minDis = 1000;
+    for (auto i : current->boxPos) {
+        int minDis = std::numeric_limits<int>::max();
         for (auto j : targetPos) {
             int dis = abs(i.first - j.first) + abs(i.second - j.second);
             if (dis < minDis)
@@ -158,7 +169,7 @@ void Sokoban::computeAstarFunction(Step &current) {
         }
         totalMinDis += minDis;
     }
-    current.predictCost = totalMinDis + 2 * leftBox;
+    return 2 * leftBox + totalMinDis + current->stepHistory.size() / 10;
 }
 void Sokoban::findLeastCost() {
     delete currentStep;
@@ -203,12 +214,10 @@ bool Sokoban::solve() {
             dirSave.push_back(rightStep);
 
         for (auto it : dirSave)
-            computeAstarFunction(*it);
+            it->predictCost = heuristic(it);
         while (!dirSave.empty()) {
-            if (openSave.find(dirSave.front()) == openSave.end()) {
-                openSave.emplace(dirSave.front());
+            if (closed.find(dirSave.front()) == closed.end()) 
                 open.emplace(dirSave.front());
-            }
             dirSave.pop_front();
         }
         if (open.size() > 0) {
@@ -228,5 +237,8 @@ bool Sokoban::solve() {
     for (auto i : currentStep->stepHistory)
         std::cout << i;
     std::cout << "\n";
+    DebugLog("Open list total count: " << openSave.size());
+    DebugLog("Open list count: " << open.size());
+    DebugLog("Close list count: " << closed.size());
     return true;
 }

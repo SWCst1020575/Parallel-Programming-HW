@@ -25,10 +25,11 @@
 #define PrintSokoban(x)
 #endif
 
-
+#include <algorithm>
 #include <boost/functional/hash.hpp>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <list>
 #include <queue>
 #include <string>
@@ -48,7 +49,7 @@ class Sokoban {
     Step *move(Step &, char);
     bool moveBox(Step *, char, std::unordered_set<std::pair<int, int>>::iterator &);
     char *operator[](int index) { return map[index]; }
-    void computeAstarFunction(Step &);
+    int heuristic(Step *);
     void printOpen();
     void findLeastCost();
     bool solve();
