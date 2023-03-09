@@ -14,4 +14,6 @@ int main(int argc, char *argv[]) {
     //PrintSokoban(sokoban);
     if (sokoban.solve())
         DebugLog("Find path!");
+    else
+        DebugLog("Failed!");
 }

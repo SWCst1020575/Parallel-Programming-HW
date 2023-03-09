@@ -47,7 +47,8 @@ class Sokoban {
     bool isComplete(Step &);
     bool isDead(Step &);
     Step *move(Step &, char);
-    bool moveBox(Step *, char, std::unordered_set<std::pair<int, int>>::iterator &);
+    Step *move(Step &, char, Step *);
+    bool moveBox(Step *, char, std::pair<int, int> &);
     char *operator[](int index) { return map[index]; }
     int heuristic(Step *);
     void printOpen();
