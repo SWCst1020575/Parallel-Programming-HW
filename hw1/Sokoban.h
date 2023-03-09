@@ -65,3 +65,14 @@ class Sokoban {
     std::unordered_set<Step, stepHash> openSave;
     std::priority_queue<Step *, std::vector<Step *>, stepCompare> open;
 };
+class Near {
+   public:
+    Near(){};
+    ~Near(){};
+    void setFalse() {
+        up = false, left = false, down = false, right = false;
+        upLeft = false, upRight = false, downLeft = false, downRight = false;
+    }
+    bool up, left, down, right;
+    bool upLeft, upRight, downLeft, downRight;
+};

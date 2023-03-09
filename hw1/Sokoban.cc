@@ -59,29 +59,51 @@ bool Sokoban::isComplete(Step &nowStep) {
             return false;
     return true;
 }
+Near wall;
+Near box;
 bool Sokoban::isDead(Step &nowStep) {
     for (auto i : nowStep.boxPos) {
-        bool up = false, left = false, down = false, right = false;  // true == obstacle
-        bool upBox = false, leftBox = false, downBox = false, rightBox = false;
-        if (map[i.second - 1][i.first] == Wall)
-            up = true;
-        if (map[i.second][i.first - 1] == Wall)
-            left = true;
-        if (map[i.second + 1][i.first] == Wall)
-            down = true;
-        if (map[i.second][i.first + 1] == Wall)
-            right = true;
-        if (nowStep.boxPos.find(std::make_pair(i.first, i.second - 1)) != nowStep.boxPos.end())
-            upBox = true;
-        if (nowStep.boxPos.find(std::make_pair(i.first - 1, i.second)) != nowStep.boxPos.end())
-            leftBox = true;
-        if (nowStep.boxPos.find(std::make_pair(i.first, i.second + 1)) != nowStep.boxPos.end())
-            downBox = true;
-        if (nowStep.boxPos.find(std::make_pair(i.first + 1, i.second)) != nowStep.boxPos.end())
-            rightBox = true;
         if (map[i.second][i.first] == Target || map[i.second][i.first] == BoxOnTarget || map[i.second][i.first] == PlayerOnTarget)
             continue;
-        if ((up || down) && (left || right))
+        wall.setFalse();
+        box.setFalse();
+        if (map[i.second - 1][i.first] == Wall)
+            wall.up = true;
+        if (map[i.second][i.first - 1] == Wall)
+            wall.left = true;
+        if (map[i.second + 1][i.first] == Wall)
+            wall.down = true;
+        if (map[i.second][i.first + 1] == Wall)
+            wall.right = true;
+        if (map[i.second - 1][i.first - 1] == Wall)
+            wall.upLeft = true;
+        if (map[i.second - 1][i.first + 1] == Wall)
+            wall.upRight = true;
+        if (map[i.second + 1][i.first - 1] == Wall)
+            wall.downLeft = true;
+        if (map[i.second + 1][i.first + 1] == Wall)
+            wall.downRight = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first, i.second - 1)) != nowStep.boxPos.end())
+            box.up = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first - 1, i.second)) != nowStep.boxPos.end())
+            box.left = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first, i.second + 1)) != nowStep.boxPos.end())
+            box.down = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first + 1, i.second)) != nowStep.boxPos.end())
+            box.right = true;
+        /*if (nowStep.boxPos.find(std::make_pair(i.first - 1, i.second - 1)) != nowStep.boxPos.end())
+            box.upLeft = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first + 1, i.second - 1)) != nowStep.boxPos.end())
+            box.upRight = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first - 1, i.second + 1)) != nowStep.boxPos.end())
+            box.downLeft = true;
+        if (nowStep.boxPos.find(std::make_pair(i.first + 1, i.second + 1)) != nowStep.boxPos.end())
+            box.downRight = true;*/
+        if ((wall.up || wall.down) && (wall.left || wall.right))
+            return true;
+        if (((box.down && (wall.downLeft || wall.downRight)) || (box.up && (wall.upLeft || wall.upRight))) && (wall.left || wall.right))
+            return true;
+        if (((box.left && (wall.upLeft || wall.downLeft)) || (box.right && (wall.upRight || wall.downRight))) && (wall.up || wall.down))
             return true;
     }
     return false;
@@ -195,7 +217,8 @@ bool Sokoban::solve() {
         return true;
     if (isDead(*currentStep))
         return false;
-    closed.emplace(*currentStep);
+    closed.emplace(currentStep);
+    openSave.emplace(currentStep);
     std::list<Step *> dirSave;
     int count = 0;
 
@@ -216,8 +239,10 @@ bool Sokoban::solve() {
         for (auto it : dirSave)
             it->predictCost = heuristic(it);
         while (!dirSave.empty()) {
-            if (closed.find(dirSave.front()) == closed.end()) 
+            if (openSave.find(dirSave.front()) == openSave.end()) {
+                openSave.emplace(dirSave.front());
                 open.emplace(dirSave.front());
+            }
             dirSave.pop_front();
         }
         if (open.size() > 0) {
