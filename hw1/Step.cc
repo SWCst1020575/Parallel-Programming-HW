@@ -22,8 +22,8 @@ Step::~Step() {
 
 std::size_t stepHash::operator()(Step const& val) const {
     std::size_t seed = 0;
-    boost::hash_combine(seed, val.playerPosX);
-    boost::hash_combine(seed, val.playerPosY);
+    // boost::hash_combine(seed, val.playerPosX);
+    // boost::hash_combine(seed, val.playerPosY);
     for (auto i : val.boxPos) {
         boost::hash_combine(seed, i.first);
         boost::hash_combine(seed, i.second);

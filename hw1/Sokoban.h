@@ -46,12 +46,13 @@ class Sokoban {
     ~Sokoban();
     bool isComplete(Step &);
     bool isDead(Step &);
-    Step *move(Step &, char);
+    Step *move(Step &, char, bool &);
     bool moveBox(Step *, char, std::unordered_set<std::pair<int, int>>::iterator &);
     char *operator[](int index) { return map[index]; }
     int heuristic(Step *);
-    void printOpen();
     void findLeastCost();
+    void checkMoveBox(std::list<Step *> *, Step *, std::unordered_set<std::pair<int, int>, PairHash> &, bool &);
+    void findBox(std::list<Step *> *, Step *, std::unordered_set<std::pair<int, int>, PairHash> &);
     bool solve();
 
    private:
