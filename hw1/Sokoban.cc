@@ -162,8 +162,10 @@ void Sokoban::checkMoveBox(std::list<Step *> *stepList, Step *current, std::unor
         if (closed.find(*current) == closed.end()) {
             stepList->push_back(current);
             return;
-        } else
+        } else {
             delete current;
+            return;
+        }
     } else if (playerPosList.find(std::make_pair(current->playerPosX, current->playerPosY)) == playerPosList.end())
         findBox(stepList, current, playerPosList);
     delete current;
@@ -198,7 +200,7 @@ int Sokoban::heuristic(Step *current) {
         }
         totalMinDis += minDis;
     }
-    return 2 * leftBox + totalMinDis;
+    return totalMinDis + +current->stepHistory.size() / 10;
 }
 void Sokoban::findLeastCost() {
     delete currentStep;
@@ -233,14 +235,16 @@ bool Sokoban::solve() {
         for (auto it : dirSave)
             it->predictCost = heuristic(it);
         while (!dirSave.empty()) {
-            //if (closed.find(dirSave.front()) == closed.end())
-              //  open.emplace(dirSave.front());
+            if (openSave.find(dirSave.front()) == openSave.end()) {
+                open.emplace(dirSave.front());
+                openSave.emplace(dirSave.front());
+            }
             dirSave.pop_front();
         }
         if (open.size() > 0) {
             findLeastCost();
-           // while (closed.find(currentStep) != closed.end() && open.size() > 0)
-             //   findLeastCost();
+            // while (closed.find(currentStep) != closed.end() && open.size() > 0)
+            //   findLeastCost();
             closed.emplace(*currentStep);
         } else
             return false;
