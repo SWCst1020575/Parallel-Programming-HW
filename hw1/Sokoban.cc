@@ -108,9 +108,9 @@ bool Sokoban::isDead(Step &nowStep) {
     }
     return false;
 }
-Step *Sokoban::move(Step &nowStep, char dir, Step *boxStep) { return nullptr; }
-Step *Sokoban::move(Step &nowStep, char dir) {
+Step *Sokoban::move(Step &nowStep, char dir, bool &isMoveBox) {
     std::pair<int, int> newPlayerPos;
+    isMoveBox = false;
     switch (dir) {
         case 'W':
             newPlayerPos = std::make_pair(nowStep.playerPosX, nowStep.playerPosY - 1);
@@ -148,31 +148,7 @@ Step *Sokoban::move(Step &nowStep, char dir) {
             newStep->playerPosX = newPlayerPos.first;
             newStep->playerPosY = newPlayerPos.second;
             newStep->stepHistory.push_back(dir);
-            // tunnel
-            /*
-            if (dir == 'W' || dir == 'S')
-                while (moveBox(newStep, dir, newBoxPos) && map[newBoxPos.second][newBoxPos.first - 1] == Wall && map[newBoxPos.second][newBoxPos.first + 1] == Wall) {
-                    newStep->playerPosX = newBoxPos.first;
-                    newStep->playerPosY = newBoxPos.second;
-                    DebugLog(newBoxPos.first << " " << newBoxPos.second);
-                    if (dir == 'W')
-                        newBoxPos.second--;
-                    else if (dir == 'S')
-                        newBoxPos.second++;
-                    newStep->stepHistory.push_back(dir);
-                }
-            else if (dir == 'A' || dir == 'D')
-                while (moveBox(newStep, dir, newBoxPos) && map[newBoxPos.second - 1][newBoxPos.first] == Wall && map[newBoxPos.second + 1][newBoxPos.first] == Wall) {
-                    newStep->playerPosX = newBoxPos.first;
-                    newStep->playerPosY = newBoxPos.second;
-                    DebugLog(newBoxPos.first << " " << newBoxPos.second);
-                    if (dir == 'A')
-                        newBoxPos.first--;
-                    else if (dir == 'D')
-                        newBoxPos.first++;
-                    newStep->stepHistory.push_back(dir);
-                } */
-            newStep->boxPos.emplace(newBoxPos);
+            isMoveBox = true;
             return newStep;
         } else
             return nullptr;
@@ -205,6 +181,35 @@ bool Sokoban::moveBox(Step *nowStep, char dir, std::pair<int, int> &playerPos) {
         return false;
     return true;
 }
+void Sokoban::checkMoveBox(std::list<Step *> *stepList, Step *current, std::unordered_set<std::pair<int, int>, PairHash> &playerPosList, bool &isBoxMove) {
+    if (isBoxMove) {
+        if (closed.find(*current) == closed.end()) {
+            stepList->push_back(current);
+            return;
+        } else {
+            delete current;
+            return;
+        }
+    } else if (playerPosList.find(std::make_pair(current->playerPosX, current->playerPosY)) == playerPosList.end())
+        findBox(stepList, current, playerPosList);
+    delete current;
+}
+void Sokoban::findBox(std::list<Step *> *stepList, Step *current, std::unordered_set<std::pair<int, int>, PairHash> &playerPosList) {
+    playerPosList.emplace(std::make_pair(current->playerPosX, current->playerPosY));
+    bool isBoxMove;
+    Step *upStep = move(*current, 'W', isBoxMove);
+    if (upStep != nullptr && !isDead(*upStep))
+        checkMoveBox(stepList, upStep, playerPosList, isBoxMove);
+    Step *leftStep = move(*current, 'A', isBoxMove);
+    if (leftStep != nullptr && !isDead(*leftStep))
+        checkMoveBox(stepList, leftStep, playerPosList, isBoxMove);
+    Step *downStep = move(*current, 'S', isBoxMove);
+    if (downStep != nullptr && !isDead(*downStep))
+        checkMoveBox(stepList, downStep, playerPosList, isBoxMove);
+    Step *rightStep = move(*current, 'D', isBoxMove);
+    if (rightStep != nullptr && !isDead(*rightStep))
+        checkMoveBox(stepList, rightStep, playerPosList, isBoxMove);
+}
 int Sokoban::heuristic(Step *current) {
     int totalMinDis = 0;
     for (auto i : current->boxPos) {
@@ -223,20 +228,7 @@ void Sokoban::findLeastCost() {
     currentStep = open.top();
     open.pop();
 }
-void Sokoban::printOpen() {
-    DebugLog("PrintOpen Function");
-    auto pq = open;
-    while (!pq.empty()) {
-        std::cout << pq.top()->predictCost << " ";
-        pq.pop();
-    }
-    DebugLog("");
-    DebugLog(open.size());
-    DebugLog("---------Box---------");
-    for (auto i : currentStep->boxPos)
-        DebugLog(i.first << " " << i.second);
-    DebugLog("---------Box---------");
-}
+
 bool Sokoban::solve() {
     if (isComplete(*currentStep))
         return true;
@@ -246,34 +238,35 @@ bool Sokoban::solve() {
     openSave.emplace(currentStep);
     std::list<Step *> dirSave;
     int count = 0;
-
-    while (!isComplete(*currentStep)) {
-        Step *upStep = move(*currentStep, 'W');
-        if (upStep != nullptr && !isDead(*upStep))
-            dirSave.push_back(upStep);
-        Step *leftStep = move(*currentStep, 'A');
-        if (leftStep != nullptr && !isDead(*leftStep))
-            dirSave.push_back(leftStep);
-        Step *downStep = move(*currentStep, 'S');
-        if (downStep != nullptr && !isDead(*downStep))
-            dirSave.push_back(downStep);
-        Step *rightStep = move(*currentStep, 'D');
-        if (rightStep != nullptr && !isDead(*rightStep))
-            dirSave.push_back(rightStep);
-
+    std::unordered_set<std::pair<int, int>, PairHash> playerPosList;
+    do { /*
+          Step *upStep = move(*currentStep, 'W');
+          if (upStep != nullptr && !isDead(*upStep))
+              dirSave.push_back(upStep);
+          Step *leftStep = move(*currentStep, 'A');
+          if (leftStep != nullptr && !isDead(*leftStep))
+              dirSave.push_back(leftStep);
+          Step *downStep = move(*currentStep, 'S');
+          if (downStep != nullptr && !isDead(*downStep))
+              dirSave.push_back(downStep);
+          Step *rightStep = move(*currentStep, 'D');
+          if (rightStep != nullptr && !isDead(*rightStep))
+              dirSave.push_back(rightStep);*/
+        playerPosList.clear();
+        findBox(&dirSave, currentStep, playerPosList);
         for (auto it : dirSave)
             it->predictCost = heuristic(it);
         while (!dirSave.empty()) {
             if (openSave.find(dirSave.front()) == openSave.end()) {
-                openSave.emplace(dirSave.front());
                 open.emplace(dirSave.front());
+                openSave.emplace(dirSave.front());
             }
             dirSave.pop_front();
         }
         if (open.size() > 0) {
             findLeastCost();
-            while (closed.find(currentStep) != closed.end() && open.size() > 0)
-                findLeastCost();
+            // while (closed.find(currentStep) != closed.end() && open.size() > 0)
+            //   findLeastCost();
             closed.emplace(*currentStep);
         } else
             return false;
@@ -282,7 +275,7 @@ bool Sokoban::solve() {
             std::cout << i << " | ";*/
         // DebugLog(" Now:(" << currentStep->playerPosX << "," << currentStep->playerPosY << ")");
         count++;
-    }
+    } while (!isComplete(*currentStep));
     DebugLog("Step: " << count);
     for (auto i : currentStep->stepHistory)
         std::cout << i;
