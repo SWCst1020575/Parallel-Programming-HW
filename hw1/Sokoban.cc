@@ -47,7 +47,6 @@ Sokoban::~Sokoban() {
         delete[] map[i];
     delete[] map;
     while (!open.empty()) {
-        openSave.erase(*open.top());
         delete open.top();
         open.pop();
     }
@@ -132,7 +131,7 @@ Step *Sokoban::move(Step &nowStep, char dir, bool &isMoveBox) {
     Step *newStep;
     auto boxIter = nowStep.boxPos.find(newPlayerPos);
     if (boxIter != nowStep.boxPos.end()) {
-        if (moveBox(&nowStep, dir, newPlayerPos)) {
+        if (moveBox(&nowStep, dir, boxIter)) {
             newStep = new Step(nowStep);
             newStep->boxPos.erase(newStep->boxPos.find(newPlayerPos));
             std::pair<int, int> newBoxPos;
@@ -144,7 +143,7 @@ Step *Sokoban::move(Step &nowStep, char dir, bool &isMoveBox) {
                 newBoxPos = std::make_pair(newPlayerPos.first, newPlayerPos.second + 1);
             else if (dir == 'D')
                 newBoxPos = std::make_pair(newPlayerPos.first + 1, newPlayerPos.second);
-
+            newStep->boxPos.emplace(newBoxPos);
             newStep->playerPosX = newPlayerPos.first;
             newStep->playerPosY = newPlayerPos.second;
             newStep->stepHistory.push_back(dir);
@@ -159,20 +158,20 @@ Step *Sokoban::move(Step &nowStep, char dir, bool &isMoveBox) {
     newStep->stepHistory.push_back(dir);
     return newStep;
 }
-bool Sokoban::moveBox(Step *nowStep, char dir, std::pair<int, int> &playerPos) {
+bool Sokoban::moveBox(Step *nowStep, char dir, std::unordered_set<std::pair<int, int>>::iterator &it) {
     std::pair<int, int> newBoxPos;
     switch (dir) {
         case 'W':
-            newBoxPos = std::make_pair(playerPos.first, playerPos.second - 1);
+            newBoxPos = std::make_pair((*it).first, (*it).second - 1);
             break;
         case 'A':
-            newBoxPos = std::make_pair(playerPos.first - 1, playerPos.second);
+            newBoxPos = std::make_pair((*it).first - 1, (*it).second);
             break;
         case 'S':
-            newBoxPos = std::make_pair(playerPos.first, playerPos.second + 1);
+            newBoxPos = std::make_pair((*it).first, (*it).second + 1);
             break;
         case 'D':
-            newBoxPos = std::make_pair(playerPos.first + 1, playerPos.second);
+            newBoxPos = std::make_pair((*it).first + 1, (*it).second);
             break;
     }
     if (newBoxPos.first < 0 || newBoxPos.first > w || newBoxPos.second < 0 || newBoxPos.second > h)
@@ -235,23 +234,10 @@ bool Sokoban::solve() {
     if (isDead(*currentStep))
         return false;
     closed.emplace(currentStep);
-    openSave.emplace(currentStep);
     std::list<Step *> dirSave;
     int count = 0;
     std::unordered_set<std::pair<int, int>, PairHash> playerPosList;
-    do { /*
-          Step *upStep = move(*currentStep, 'W');
-          if (upStep != nullptr && !isDead(*upStep))
-              dirSave.push_back(upStep);
-          Step *leftStep = move(*currentStep, 'A');
-          if (leftStep != nullptr && !isDead(*leftStep))
-              dirSave.push_back(leftStep);
-          Step *downStep = move(*currentStep, 'S');
-          if (downStep != nullptr && !isDead(*downStep))
-              dirSave.push_back(downStep);
-          Step *rightStep = move(*currentStep, 'D');
-          if (rightStep != nullptr && !isDead(*rightStep))
-              dirSave.push_back(rightStep);*/
+    do {
         playerPosList.clear();
         findBox(&dirSave, currentStep, playerPosList);
         for (auto it : dirSave)
@@ -265,15 +251,9 @@ bool Sokoban::solve() {
         }
         if (open.size() > 0) {
             findLeastCost();
-            // while (closed.find(currentStep) != closed.end() && open.size() > 0)
-            //   findLeastCost();
             closed.emplace(*currentStep);
         } else
             return false;
-        // no answer
-        /*for (auto i : currentStep->stepHistory)
-            std::cout << i << " | ";*/
-        // DebugLog(" Now:(" << currentStep->playerPosX << "," << currentStep->playerPosY << ")");
         count++;
     } while (!isComplete(*currentStep));
     DebugLog("Step: " << count);
