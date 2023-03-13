@@ -1,6 +1,6 @@
 CXX = g++
-CXXFLAGS = -std=c++17 -O3 -pthread -fopenmp
-SOURCE = hw1.cc Sokoban.cc Step.cc
+CXXFLAGS = -std=c++17 -O3 -pthread -fopenmp 
+SOURCE = hw1.cc Sokoban.cc Step.cc 
 TARGETS = hw1
 
 	

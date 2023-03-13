@@ -10,6 +10,9 @@ Sokoban::Sokoban(int &argc, char *argv[], std::ifstream &file) {
     totalBox = 0;
     boxOnTarget = 0;
     currentStep = new Step();
+    isEnd = false;
+    for (int i = 0; i < THREADS; i++)
+        threadStep[i] = nullptr;
     while (std::getline(file, s)) {
         if (!isFirst) {
             isFirst = 1;
@@ -46,14 +49,17 @@ Sokoban::~Sokoban() {
     for (int i = 0; i < maxRow; i++)
         delete[] map[i];
     delete[] map;
-    while (!open.empty()) {
-        delete open.top();
-        open.pop();
-    }
+    for (int i = 0; i < THREADS; i++)
+        while (!handlerList[i].empty()) {
+            delete handlerList[i].top();
+            handlerList[i].pop();
+        }
     delete currentStep;
 }
-bool Sokoban::isComplete(Step &nowStep) {
-    for (auto i : nowStep.boxPos)
+bool Sokoban::isComplete(Step *nowStep) {
+    if (nowStep == nullptr)
+        return false;
+    for (auto i : nowStep->boxPos)
         if (map[i.second][i.first] != Target && map[i.second][i.first] != BoxOnTarget && map[i.second][i.first] != PlayerOnTarget)
             return false;
     return true;
@@ -182,13 +188,8 @@ bool Sokoban::moveBox(Step *nowStep, char dir, std::unordered_set<std::pair<int,
 }
 void Sokoban::checkMoveBox(std::list<Step *> *stepList, Step *current, std::unordered_set<std::pair<int, int>, PairHash> &playerPosList, bool &isBoxMove) {
     if (isBoxMove) {
-        if (closed.find(*current) == closed.end()) {
-            stepList->push_back(current);
-            return;
-        } else {
-            delete current;
-            return;
-        }
+        stepList->push_back(current);
+        return;
     } else if (playerPosList.find(std::make_pair(current->playerPosX, current->playerPosY)) == playerPosList.end())
         findBox(stepList, current, playerPosList);
     delete current;
@@ -222,46 +223,113 @@ int Sokoban::heuristic(Step *current) {
     }
     return totalMinDis + current->stepHistory.size() / 10;
 }
-void Sokoban::findLeastCost() {
-    delete currentStep;
-    currentStep = open.top();
-    open.pop();
-}
 
+void findLeastCost(Sokoban *sokoban, int &threadID) {
+    if (sokoban->threadStep[threadID] != nullptr)
+        delete sokoban->threadStep[threadID];
+    sokoban->handlerListMutex[threadID].lock();
+    if (sokoban->handlerList[threadID].empty()) {
+        sokoban->handlerListMutex[threadID].unlock();
+        for (int i = 0; i < THREADS; i++) {
+            sokoban->handlerListMutex[i].lock();
+            if (sokoban->handlerList[i].size() > 0) {
+                sokoban->threadStep[threadID] = sokoban->handlerList[i].top();
+                sokoban->handlerList[i].pop();
+                sokoban->handlerListMutex[i].unlock();
+                return;
+            }
+            sokoban->handlerListMutex[i].unlock();
+            if (i == THREADS - 1)
+                i = -1;
+            if (sokoban->isEnd)
+                return;
+        }
+    }
+    sokoban->threadStep[threadID] = sokoban->handlerList[threadID].top();
+    sokoban->handlerList[threadID].pop();
+    sokoban->handlerListMutex[threadID].unlock();
+}
+void threadSolve(Sokoban *sokoban, int threadID) {
+    std::list<Step *> dirSave;
+    std::unordered_set<std::pair<int, int>, PairHash> playerPosList;
+    findLeastCost(sokoban, threadID);
+    do {
+        if (sokoban->isEnd)
+            return;
+        
+        playerPosList.clear();
+        sokoban->findBox(&dirSave, sokoban->threadStep[threadID], playerPosList);
+        for (auto it : dirSave)
+            it->predictCost = sokoban->heuristic(it);
+        int dirNum = dirSave.size();
+        int nowThread = dirSave.front()->predictCost % THREADS;
+        while (!dirSave.empty()) {
+            bool isFind = false;
+            for (int i = 0; i < THREADS; i++) {
+                sokoban->stepSaveMutex[i].lock();
+                if (sokoban->stepSave[i].find(dirSave.front()) != sokoban->stepSave[i].end())
+                    isFind = true;
+                sokoban->stepSaveMutex[i].unlock();
+                if (isFind)
+                    break;
+            }
+            if (!isFind) {
+                sokoban->handlerListMutex[nowThread].lock();
+                sokoban->handlerList[nowThread].emplace(dirSave.front());
+                sokoban->handlerListMutex[nowThread].unlock();
+
+                sokoban->stepSaveMutex[threadID].lock();
+                sokoban->stepSave[threadID].emplace(dirSave.front());
+                sokoban->stepSaveMutex[threadID].unlock();
+            }
+            dirSave.pop_front();
+            nowThread = (nowThread >= THREADS - 1) ? 0 : nowThread + 1;
+        }
+        findLeastCost(sokoban, threadID);
+        if (sokoban->isEnd)
+            return;
+
+    } while (!sokoban->isComplete(sokoban->threadStep[threadID]));
+    sokoban->isEnd = true;
+    sokoban->currentStep = sokoban->threadStep[threadID];
+}
 bool Sokoban::solve() {
-    if (isComplete(*currentStep))
+    if (isComplete(currentStep))
         return true;
     if (isDead(*currentStep))
         return false;
-    closed.emplace(currentStep);
     std::list<Step *> dirSave;
-    int count = 0;
     std::unordered_set<std::pair<int, int>, PairHash> playerPosList;
-    do {
-        playerPosList.clear();
-        findBox(&dirSave, currentStep, playerPosList);
-        for (auto it : dirSave)
-            it->predictCost = heuristic(it);
-        while (!dirSave.empty()) {
-            if (openSave.find(dirSave.front()) == openSave.end()) {
-                open.emplace(dirSave.front());
-                openSave.emplace(dirSave.front());
-            }
-            dirSave.pop_front();
+
+    playerPosList.clear();
+    findBox(&dirSave, currentStep, playerPosList);
+    for (auto it : dirSave)
+        it->predictCost = heuristic(it);
+    int nowThread = dirSave.front()->predictCost % THREADS;
+    while (!dirSave.empty()) {
+        bool isFind = false;
+        for (int i = 0; i < THREADS; i++) {
+            if (stepSave[i].find(dirSave.front()) != stepSave[i].end())
+                isFind = true;
+            if (isFind)
+                break;
         }
-        if (open.size() > 0) {
-            findLeastCost();
-            closed.emplace(*currentStep);
-        } else
-            return false;
-        count++;
-    } while (!isComplete(*currentStep));
-    DebugLog("Step: " << count);
+        if (!isFind) {
+            handlerList[nowThread].emplace(dirSave.front());
+            stepSave[nowThread].emplace(dirSave.front());
+        }
+        dirSave.pop_front();
+        nowThread = (nowThread >= THREADS - 1) ? 0 : nowThread + 1;
+    }
+
+    for (int i = 0; i < THREADS; i++)
+        thread[i] = new std::thread(threadSolve, this, i);
+
+    for (int i = 0; i < THREADS; i++)
+        thread[i]->join();
+
     for (auto i : currentStep->stepHistory)
         std::cout << i;
     std::cout << "\n";
-    DebugLog("Open list total count: " << openSave.size());
-    DebugLog("Open list count: " << open.size());
-    DebugLog("Close list count: " << closed.size());
     return true;
 }

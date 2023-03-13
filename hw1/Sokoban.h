@@ -1,5 +1,6 @@
 #define DEBUG 1
 #define MAXPIXELS 256
+#define THREADS 6
 
 // define input type
 #define PlayerOnNormal 'o'
@@ -26,11 +27,13 @@
 #endif
 
 #include <algorithm>
+#include <atomic>
 #include <boost/functional/hash.hpp>
 #include <fstream>
 #include <iostream>
 #include <limits>
 #include <list>
+#include <mutex>
 #include <queue>
 #include <string>
 #include <thread>
@@ -44,27 +47,31 @@ class Sokoban {
    public:
     Sokoban(int &, char **, std::ifstream &);
     ~Sokoban();
-    bool isComplete(Step &);
+    bool isComplete(Step *);
     bool isDead(Step &);
     Step *move(Step &, char, bool &);
     bool moveBox(Step *, char, std::unordered_set<std::pair<int, int>>::iterator &);
     char *operator[](int index) { return map[index]; }
     int heuristic(Step *);
-    void findLeastCost();
     void checkMoveBox(std::list<Step *> *, Step *, std::unordered_set<std::pair<int, int>, PairHash> &, bool &);
     void findBox(std::list<Step *> *, Step *, std::unordered_set<std::pair<int, int>, PairHash> &);
     bool solve();
 
-   private:
     char **map;
     int totalTarget, totalBox;
     int boxOnTarget;
+    bool isEnd;
     Step *currentStep;
+
+    Step *threadStep[THREADS];
+    std::thread *thread[THREADS];
+    std::mutex handlerListMutex[THREADS];
+    std::mutex stepSaveMutex[THREADS];
+    std::priority_queue<Step *, std::vector<Step *>, stepCompare> handlerList[THREADS];
+    std::unordered_set<Step, stepHash> stepSave[THREADS];
+
     std::unordered_set<std::pair<int, int>, PairHash> targetPos;
     std::unordered_set<std::pair<int, int>, PairHash> playOnlyPos;
-    std::unordered_set<Step, stepHash> closed;
-    std::unordered_set<Step, stepHash> openSave;
-    std::priority_queue<Step *, std::vector<Step *>, stepCompare> open;
 };
 class Near {
    public:
