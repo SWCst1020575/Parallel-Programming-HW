@@ -154,6 +154,23 @@ Step *Sokoban::move(Step &nowStep, char dir, bool &isMoveBox) {
             newStep->playerPosY = newPlayerPos.second;
             newStep->stepHistory.push_back(dir);
             isMoveBox = true;
+            /*
+                        if ((dir == 'W' || dir == 'S') && map[newBoxPos.second][newBoxPos.first - 1] == Wall && map[newBoxPos.second][newBoxPos.first + 1] == Wall) {
+                            bool isMoveBoxNext = false;
+                            auto nextStep = move(*newStep, dir, isMoveBoxNext);
+                            if (isMoveBoxNext && nextStep != nullptr && !isDead(*nextStep)) {
+                                delete newStep;
+                                return nextStep;
+                            }
+                        } else if ((dir == 'A' || dir == 'D') && map[newBoxPos.second - 1][newBoxPos.first] == Wall && map[newBoxPos.second + 1][newBoxPos.first] == Wall) {
+                            bool isMoveBoxNext = false;
+                            auto nextStep = move(*newStep, dir, isMoveBoxNext);
+                            if (isMoveBoxNext && nextStep != nullptr && !isDead(*nextStep)) {
+                                delete newStep;
+                                return nextStep;
+                            }
+                        }
+            */
             return newStep;
         } else
             return nullptr;
@@ -228,11 +245,11 @@ void findLeastCost(Sokoban *sokoban, int &threadID) {
     if (sokoban->threadStep[threadID] != nullptr)
         delete sokoban->threadStep[threadID];
     sokoban->handlerListMutex[threadID].lock();
-    if (sokoban->handlerList[threadID].empty()) {
+    if (sokoban->handlerList[threadID].empty() || sokoban->handlerList[threadID].top() == nullptr) {
         sokoban->handlerListMutex[threadID].unlock();
         for (int i = 0; i < THREADS; i++) {
             sokoban->handlerListMutex[i].lock();
-            if (sokoban->handlerList[i].size() > 0) {
+            if (sokoban->handlerList[i].size() > 0 && sokoban->handlerList[i].top() != nullptr) {
                 sokoban->threadStep[threadID] = sokoban->handlerList[i].top();
                 sokoban->handlerList[i].pop();
                 sokoban->handlerListMutex[i].unlock();
@@ -256,13 +273,15 @@ void threadSolve(Sokoban *sokoban, int threadID) {
     do {
         if (sokoban->isEnd)
             return;
-        
+
         playerPosList.clear();
+        if (sokoban->threadStep[threadID] == nullptr)
+            findLeastCost(sokoban, threadID);
         sokoban->findBox(&dirSave, sokoban->threadStep[threadID], playerPosList);
         for (auto it : dirSave)
             it->predictCost = sokoban->heuristic(it);
         int dirNum = dirSave.size();
-        int nowThread = dirSave.front()->predictCost % THREADS;
+
         while (!dirSave.empty()) {
             bool isFind = false;
             for (int i = 0; i < THREADS; i++) {
@@ -274,6 +293,17 @@ void threadSolve(Sokoban *sokoban, int threadID) {
                     break;
             }
             if (!isFind) {
+                int nowThread = 0;
+                int minListSize = std::numeric_limits<int>::max();
+
+                for (int i = 0; i < THREADS; i++) {
+                    sokoban->handlerListMutex[i].lock();
+                    if (minListSize > sokoban->handlerList[i].size()) {
+                        minListSize = sokoban->handlerList[i].size();
+                        nowThread = i;
+                    }
+                    sokoban->handlerListMutex[i].unlock();
+                }
                 sokoban->handlerListMutex[nowThread].lock();
                 sokoban->handlerList[nowThread].emplace(dirSave.front());
                 sokoban->handlerListMutex[nowThread].unlock();
@@ -283,7 +313,8 @@ void threadSolve(Sokoban *sokoban, int threadID) {
                 sokoban->stepSaveMutex[threadID].unlock();
             }
             dirSave.pop_front();
-            nowThread = (nowThread >= THREADS - 1) ? 0 : nowThread + 1;
+            if (sokoban->isEnd)
+                return;
         }
         findLeastCost(sokoban, threadID);
         if (sokoban->isEnd)
