@@ -1,9 +1,10 @@
+#include <lodepng.h>
+#include <mpi.h>
+
 #include <cassert>
 #include <cmath>
 #include <cstdio>
 #include <cstdlib>
-
-#include <lodepng.h>
 
 #define GLM_FORCE_SWIZZLE  // vec3.xyz(), vec3.xyx() ...ect, these are called "Swizzle".
 // https://glm.g-truc.net/0.9.1/api/a00002.html
@@ -123,9 +124,9 @@ double softshadow(vec3 ro, vec3 rd, double k) {
 vec3 calcNor(vec3 p) {
     vec2 e = vec2(eps, 0.);
     return normalize(vec3(map(p + e.xyy()) - map(p - e.xyy()),  // dx
-        map(p + e.yxy()) - map(p - e.yxy()),                    // dy
-        map(p + e.yyx()) - map(p - e.yyx())                     // dz
-        ));
+                          map(p + e.yxy()) - map(p - e.yxy()),  // dy
+                          map(p + e.yyx()) - map(p - e.yyx())   // dz
+                          ));
 }
 
 // first march: find object's surface
@@ -135,7 +136,7 @@ double trace(vec3 ro, vec3 rd, double& trap, int& ID) {
 
     for (int i = 0; i < ray_step; ++i) {
         len = map(ro + rd * t, trap,
-            ID);  // get minimum distance from current ray position to the object's surface
+                  ID);  // get minimum distance from current ray position to the object's surface
         if (glm::abs(len) < eps || t > far_plane) break;
         t += len * ray_multiplier;
     }
@@ -165,7 +166,10 @@ int main(int argc, char** argv) {
 
     iResolution = vec2(width, height);
     //---
-
+    MPI_Init(&argc, &argv);
+    int rank, world_size;
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &world_size);
     //---create image
     raw_image = new unsigned char[width * height * 4];
     image = new unsigned char*[height];
@@ -173,10 +177,11 @@ int main(int argc, char** argv) {
     for (int i = 0; i < height; ++i) {
         image[i] = raw_image + i * width * 4;
     }
-    //---
+//---
 
-    //---start rendering
-    for (int i = 0; i < height; ++i) {
+//---start rendering
+#pragma omp parallel for 
+    for (int i = rank; i < height; i += world_size) {
         for (int j = 0; j < width; ++j) {
             vec4 fcol(0.);  // final color (RGBA 0 ~ 1)
 
@@ -196,8 +201,8 @@ int main(int argc, char** argv) {
                     vec3 ta = target_pos;               // target position
                     vec3 cf = glm::normalize(ta - ro);  // forward vector
                     vec3 cs =
-                        glm::normalize(glm::cross(cf, vec3(0., 1., 0.)));  // right (side) vector
-                    vec3 cu = glm::normalize(glm::cross(cs, cf));          // up vector
+                        glm::normalize(glm::cross(cf, vec3(0., 1., 0.)));        // right (side) vector
+                    vec3 cu = glm::normalize(glm::cross(cs, cf));                // up vector
                     vec3 rd = glm::normalize(uv.x * cs + uv.y * cu + FOV * cf);  // ray direction
                     //---
 
@@ -226,9 +231,9 @@ int main(int argc, char** argv) {
 
                         // use orbit trap to get the color
                         col = pal(trap - .4, vec3(.5), vec3(.5), vec3(1.),
-                            vec3(.0, .1, .2));  // diffuse color
-                        vec3 ambc = vec3(0.3);  // ambient color
-                        double gloss = 32.;     // specular gloss
+                                  vec3(.0, .1, .2));  // diffuse color
+                        vec3 ambc = vec3(0.3);        // ambient color
+                        double gloss = 32.;           // specular gloss
 
                         // simple blinn phong lighting model
                         double amb =
@@ -262,15 +267,39 @@ int main(int argc, char** argv) {
             image[i][4 * j + 2] = (unsigned char)fcol.b;  // b
             image[i][4 * j + 3] = 255;                    // a
 
-            current_pixel++;
-            // print progress
-            printf("rendering...%5.2lf%%\r", current_pixel / total_pixel * 100.);
+            current_pixel += world_size;
+            //  print progress
+            //if (rank == 0)
+              //  printf("rendering...%5.2lf%%\r", current_pixel / total_pixel * 100.);
         }
     }
+    if (rank == 0) {
+        for (int r = 1; r < world_size; r++) {
+            auto recvRaw_image = new unsigned char[width * height * 4];
+            auto recvImage = new unsigned char*[height];
+            for (int i = 0; i < height; ++i)
+                recvImage[i] = recvRaw_image + i * width * 4;
+            MPI_Status status;
+            MPI_Recv(&(recvImage[0][0]), width * height * 4, MPI_UNSIGNED_CHAR, r, 1234, MPI_COMM_WORLD, &status);
+            for (int i = r; i < height; i += world_size) {
+                for (int j = 0; j < width; ++j) {
+                    image[i][4 * j + 0] = recvImage[i][4 * j + 0];
+                    image[i][4 * j + 1] = recvImage[i][4 * j + 1];
+                    image[i][4 * j + 2] = recvImage[i][4 * j + 2];
+                    image[i][4 * j + 3] = recvImage[i][4 * j + 3];
+                }
+            }
+            delete[] recvImage;
+            delete[] recvRaw_image;
+        }
+    } else {
+        MPI_Send(&(image[0][0]), width * height * 4, MPI_UNSIGNED_CHAR, 0, 1234, MPI_COMM_WORLD);
+    }
     //---
-
+    MPI_Finalize();
     //---saving image
-    write_png(argv[10]);
+    if (rank == 0)
+        write_png(argv[10]);
     //---
 
     //---finalize
