@@ -180,7 +180,7 @@ int main(int argc, char** argv) {
 //---
 
 //---start rendering
-#pragma omp parallel for 
+#pragma omp parallel for schedule(dynamic)
     for (int i = rank; i < height; i += world_size) {
         for (int j = 0; j < width; ++j) {
             vec4 fcol(0.);  // final color (RGBA 0 ~ 1)
@@ -269,8 +269,8 @@ int main(int argc, char** argv) {
 
             current_pixel += world_size;
             //  print progress
-            //if (rank == 0)
-              //  printf("rendering...%5.2lf%%\r", current_pixel / total_pixel * 100.);
+            // if (rank == 0)
+            //  printf("rendering...%5.2lf%%\r", current_pixel / total_pixel * 100.);
         }
     }
     if (rank == 0) {
