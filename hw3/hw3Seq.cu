@@ -1,3 +1,4 @@
+#include <omp.h>
 #include <png.h>
 #include <zlib.h>
 
@@ -157,14 +158,14 @@ int main(int argc, char** argv) {
 
     read_png(argv[1], &src_img, &height, &width, &channels);
     assert(channels == 3);
-    auto start = std::chrono::steady_clock::now();
+
     unsigned char* dst_img =
         (unsigned char*)malloc(height * width * channels * sizeof(unsigned char));
-
+    auto start = std::chrono::steady_clock::now();
     sobel(src_img, dst_img, height, width, channels);
     auto end = std::chrono::steady_clock::now();
     write_png(argv[2], dst_img, height, width, channels);
-    std::cout << "Kernal time: " << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count() / 1000.0 << '\n';
+    std::cout << "Kernal time: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() / 1000.0 << '\n';
     free(src_img);
     free(dst_img);
 

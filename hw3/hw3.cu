@@ -1,7 +1,9 @@
+#include <omp.h>
 #include <png.h>
 #include <stdio.h>
 #include <zlib.h>
 
+#include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cmath>
@@ -13,12 +15,12 @@
 #define MASK_Y 5
 #define SCALE 8
 
-#define BLOCK 512
-#define THREAD 512
-#define BOUND 512
-
+#define BLOCK 4096
+#define THREAD 256
+#define GRID 16
+std::atomic_int passedH;
 // clang-format off
-__device__ int mask[MASK_N][MASK_X][MASK_Y] = {
+__constant__ int mask[MASK_N][MASK_X][MASK_Y] = {
     {{ -1, -4, -6, -4, -1},
      { -2, -8,-12, -8, -2},
      {  0,  0,  0,  0,  0},
@@ -69,7 +71,7 @@ int read_png(const char* filename, unsigned char** image, unsigned* height, unsi
         png_destroy_read_struct(&png_ptr, &info_ptr, NULL);
         return 3;
     }
-
+#pragma omp simd
     for (i = 0; i < *height; ++i) {
         row_pointers[i] = *image + i * rowbytes;
     }
@@ -93,6 +95,7 @@ void write_png(const char* filename, png_bytep image, const unsigned height, con
     png_set_compression_level(png_ptr, 0);
 
     png_bytep row_ptr[height];
+#pragma omp simd
     for (int i = 0; i < height; ++i) {
         row_ptr[i] = image + i * width * channels * sizeof(unsigned char);
     }
@@ -105,57 +108,69 @@ __global__ void sobel(unsigned char* s, unsigned char* t, unsigned height, unsig
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     // printf("threadId %d %d %d\nblockId %d %d %d\nblockDim %d %d %d\ngridDim %d %d %d\nID %d\n\n", threadIdx.x, threadIdx.y, threadIdx.z, blockIdx.x, blockIdx.y, blockIdx.z, blockDim.x, blockDim.y, blockDim.z, gridDim.x, gridDim.y, gridDim.z, idx);
     // printf("%d\n", idx);
-    __shared__ unsigned char sharedImg[7 * (THREAD + 6) * 3];
+    //__shared__ unsigned char sharedImg[7 * 2 * THREAD * 3];
     int j = 0;
-    for (int i = ((idx / width - 3 < 0) ? 0 : (idx / width - 3)); i < ((idx / width + 3 < height) ? (idx / width - 3) : height); i++) {
-        sharedImg[channels * (width * j + threadIdx.x + 3) + 2] = s[channels * (width * i + threadIdx.x) + 2];
-        sharedImg[channels * (width * j + threadIdx.x + 3) + 1] = s[channels * (width * i + threadIdx.x) + 1];
-        sharedImg[channels * (width * j + threadIdx.x + 3)] = s[channels * (width * i + threadIdx.x)];
-        j++;
-    }
+
     j = 0;
-    for (int i = 0; i < 3; i++) {
-        /*sharedImg[channels * (width * j + threadIdx.x + i) + 2] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i)) + 2];
-        sharedImg[channels * (width * j + threadIdx.x + i) + 1] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i)) + 1];
-        sharedImg[channels * (width * j + threadIdx.x + i)] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i))];
-        sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i) + 2] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i) + 2];
-        sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i) + 1] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i) + 1];
-        sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i)] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i)];
-        j++;*/
-    }
-    if (threadIdx.x == 1) {
+    // for (int i = 0; i < 3; i++) {
+    /*sharedImg[channels * (width * j + threadIdx.x + i) + 2] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i)) + 2];
+    sharedImg[channels * (width * j + threadIdx.x + i) + 1] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i)) + 1];
+    sharedImg[channels * (width * j + threadIdx.x + i)] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x - (3 - i))];
+    sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i) + 2] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i) + 2];
+    sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i) + 1] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i) + 1];
+    sharedImg[channels * (width * j + threadIdx.x + 3 + THREAD + i)] = s[channels * (width * ((idx / width - 3 < 0) ? 0 : (idx / width - 3)) + threadIdx.x + 3 + THREAD + i)];
+    j++;*/
+    //}
+    /*if (threadIdx.x == 1) {
         for (int i = 0; i < 7 * (THREAD + 6) * 3; i++)
             printf("%d ", sharedImg[i]);
         printf("\n");
-    }
+    }*/
 
-    __syncthreads();
+    //__syncthreads();
     int x, y, i, v, u;
     int R, G, B;
-    double val[MASK_N * 3] = {0.0};
+    float val[MASK_N * 3] = {0.0};
     int adjustX, adjustY, xBound, yBound;
+
+    // float maxColor = 255.0;
+    //  int x = threadIdx.x + blockIdx.x * blockDim.x;
+    //   int y = threadIdx.y + blockIdx.y * blockDim.y;
+    //  printf("%d %d\n",cudax,cuday);
+    adjustX = (MASK_X % 2) ? 1 : 0;
+    adjustY = (MASK_Y % 2) ? 1 : 0;
+    xBound = MASK_X / 2;
+    yBound = MASK_Y / 2;
     for (j = idx; j < height * width; j += BLOCK * THREAD) {
+        /*int startH = ((idx / width - 3 < 0) ? 0 : (idx / width - 3));
+        for (int jj = startH; jj < ((idx / width + 3 < height) ? (idx / width - 3) : height); jj++) {
+            for (int c = 0; c < 2; c++) {
+                if (channels * (width * jj + j + c - 3) / 2 >= 0) {
+                    sharedImg[channels * (width * (jj - startH) + threadIdx.x + c) + 2] = s[channels * (width * jj + j + c - 3) + 2];
+                    sharedImg[channels * (width * (jj - startH) + threadIdx.x + c) + 1] = s[channels * (width * jj + j + c - 3) + 1];
+                    sharedImg[channels * (width * (jj - startH) + threadIdx.x + c)] = s[channels * (width * jj + j + c - 3) / 2];
+                }
+            }
+            printf("C\n");
+            // sharedImg[channels * (width * j + threadIdx.x + 3) + 1] = s[channels * (width * i + threadIdx.x) + 1];
+            // sharedImg[channels * (width * j + threadIdx.x + 3)] = s[channels * (width * i + threadIdx.x)];
+        }
+        __syncthreads();*/
         x = j % width;
         y = j / width;
         for (i = 0; i < MASK_N; ++i) {
-            adjustX = (MASK_X % 2) ? 1 : 0;
-            adjustY = (MASK_Y % 2) ? 1 : 0;
-            xBound = MASK_X / 2;
-            yBound = MASK_Y / 2;
-
             val[i * 3 + 2] = 0.0;
             val[i * 3 + 1] = 0.0;
             val[i * 3] = 0.0;
-
             for (v = -yBound; v < yBound + adjustY; ++v) {
                 for (u = -xBound; u < xBound + adjustX; ++u) {
                     if ((x + u) >= 0 && (x + u) < width && y + v >= 0 && y + v < height) {
-                        // R = s[channels * (width * (y + v) + (x + u)) + 2];
-                        // G = s[channels * (width * (y + v) + (x + u)) + 1];
-                        // B = s[channels * (width * (y + v) + (x + u)) + 0];
-                        R = sharedImg[channels * (width * (3 + v) + (threadIdx.x + u)) + 2];
-                        G = sharedImg[channels * (width * (3 + v) + (threadIdx.x + u)) + 1];
-                        B = sharedImg[channels * (width * (3 + v) + (threadIdx.x + u)) + 0];
+                        R = s[channels * (width * (y + v) + (x + u)) + 2];
+                        G = s[channels * (width * (y + v) + (x + u)) + 1];
+                        B = s[channels * (width * (y + v) + (x + u)) + 0];
+                        // R = sharedImg[channels * ((2 * THREAD) * (3 + v) + (threadIdx.x + u + 3)) + 2];
+                        // G = sharedImg[channels * ((2 * THREAD) * (3 + v) + (threadIdx.x + u + 3)) + 1];
+                        // B = sharedImg[channels * ((2 * THREAD) * (3 + v) + (threadIdx.x + u + 3))];
                         val[i * 3 + 2] += R * mask[i][u + xBound][v + yBound];
                         val[i * 3 + 1] += G * mask[i][u + xBound][v + yBound];
                         val[i * 3 + 0] += B * mask[i][u + xBound][v + yBound];
@@ -164,61 +179,65 @@ __global__ void sobel(unsigned char* s, unsigned char* t, unsigned height, unsig
             }
         }
 
-        double totalR = 0.0;
-        double totalG = 0.0;
-        double totalB = 0.0;
+        float totalR = 0.0;
+        float totalG = 0.0;
+        float totalB = 0.0;
         for (i = 0; i < MASK_N; ++i) {
             totalR += val[i * 3 + 2] * val[i * 3 + 2];
             totalG += val[i * 3 + 1] * val[i * 3 + 1];
             totalB += val[i * 3 + 0] * val[i * 3 + 0];
         }
-        totalR = sqrt(totalR) / SCALE;
-        totalG = sqrt(totalG) / SCALE;
-        totalB = sqrt(totalB) / SCALE;
-        const unsigned char cR = (totalR > 255.0) ? 255 : totalR;
-        const unsigned char cG = (totalG > 255.0) ? 255 : totalG;
-        const unsigned char cB = (totalB > 255.0) ? 255 : totalB;
-        t[channels * (width * y + x) + 2] = cR;
-        t[channels * (width * y + x) + 1] = cG;
-        t[channels * (width * y + x) + 0] = cB;
+        t[channels * (width * y + x) + 2] = (totalR > 4161600.0) ? 255 : sqrt(totalR) / SCALE;
+        t[channels * (width * y + x) + 1] = (totalG > 4161600.0) ? 255 : sqrt(totalG) / SCALE;
+        t[channels * (width * y + x) + 0] = (totalB > 4161600.0) ? 255 : sqrt(totalB) / SCALE;
     }
-
-    /*for (y = 0; y < height; ++y) {
-        for (x = 0; x < width; ++x) {
-
-        }
-    }*/
 }
+
 int main(int argc, char** argv) {
     assert(argc == 3);
     unsigned height, width, channels;
     unsigned char* src_img = NULL;
-
+    passedH = 0;
+    auto start = std::chrono::steady_clock::now();
     read_png(argv[1], &src_img, &height, &width, &channels);
+    auto end = std::chrono::steady_clock::now();
     assert(channels == 3);
-
     const unsigned imgSize = height * width * channels * sizeof(unsigned char);
     unsigned char* dst_img = (unsigned char*)malloc(imgSize);
     unsigned char* src_imgCuda;
     unsigned char* dst_imgCuda;
+    auto IOTime = end - start;
+    start = std::chrono::steady_clock::now();
     cudaMalloc(&src_imgCuda, imgSize);
     cudaMemcpy(src_imgCuda, src_img, imgSize, cudaMemcpyHostToDevice);
     cudaMalloc(&dst_imgCuda, imgSize);
-    cudaMemcpy(dst_imgCuda, dst_img, imgSize, cudaMemcpyHostToDevice);
-    auto start = std::chrono::steady_clock::now();
-    // sobel(src_img, dst_img, height, width, channels);
+    // cudaMemcpy(dst_imgCuda, dst_img, imgSize, cudaMemcpyHostToDevice);
+    end = std::chrono::steady_clock::now();
+    auto MemTime = end - start;
+    
+    start = std::chrono::steady_clock::now();
+    // dim3 threads(32, 16, 1);
+    // dim3 blocks(width / 32 + 1, height / 16 + 1, 1);
     sobel<<<BLOCK, THREAD>>>(src_imgCuda, dst_imgCuda, height, width, channels);
+
+    // sobel<<<1, THREAD>>>(src_imgCuda, dst_imgCuda, height, width, channels, i);
     cudaDeviceSynchronize();
-    auto end = std::chrono::steady_clock::now();
-    cudaMemcpy(src_img, src_imgCuda, imgSize, cudaMemcpyDeviceToHost);
+    end = std::chrono::steady_clock::now();
+    auto KernelTime = end - start;
+    start = std::chrono::steady_clock::now();
     cudaMemcpy(dst_img, dst_imgCuda, imgSize, cudaMemcpyDeviceToHost);
-
-    std::cout << "Kernal time: " << std::chrono::duration_cast<std::chrono::microseconds>(end - start).count() << '\n';
+    end = std::chrono::steady_clock::now();
+    MemTime += (end - start);
+    start = std::chrono::steady_clock::now();
     write_png(argv[2], dst_img, height, width, channels);
-
+    end = std::chrono::steady_clock::now();
+    IOTime += (end - start);
     // free memory
     cudaDeviceReset();
     free(src_img);
     free(dst_img);
+    std::cout << "IO time: " << std::chrono::duration_cast<std::chrono::microseconds>(IOTime).count() << '\n';
+    std::cout << "Memory time: " << std::chrono::duration_cast<std::chrono::microseconds>(MemTime).count() << '\n';
+    std::cout << "Kernel time: " << std::chrono::duration_cast<std::chrono::microseconds>(KernelTime).count() << '\n';
     return 0;
 }

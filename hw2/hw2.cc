@@ -52,7 +52,6 @@ void write_png(const char* filename) {
 
     if (error) printf("png error %u: %s\n", error, lodepng_error_text(error));
 }
-
 // mandelbulb distance function (DE)
 // v = v^8 + c
 // p: current position

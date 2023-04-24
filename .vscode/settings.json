@@ -58,6 +58,7 @@
         "utility": "cpp",
         "variant": "cpp",
         "condition_variable": "cpp",
-        "mutex": "cpp"
+        "mutex": "cpp",
+        "cstdarg": "cpp"
     }
 }
