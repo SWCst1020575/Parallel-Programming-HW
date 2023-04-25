@@ -17,8 +17,8 @@
 
 ////////////////////////   Block   /////////////////////
 
-#define BLOCK 8192
-#define THREAD 64
+#define BLOCK 1024
+#define THREAD 128
 
 __constant__ const WORD loopLimit = 0xffffffff / (THREAD * BLOCK);
 
@@ -35,22 +35,12 @@ __device__ void copyBlock(HashBlock *target, HashBlock *source) {
     target->version = source->version;
     target->ntime = source->ntime;
     target->nbits = source->nbits;
-    target->nonce = source->nonce;
 #pragma unroll
     for (int i = 0; i < 32; i++) {
         target->prevhash[i] = source->prevhash[i];
         target->merkle_root[i] = source->merkle_root[i];
     }
 }
-__device__ void copySHA256(SHA256 *target, SHA256 *source) {
-#pragma unroll
-    for (int i = 0; i < 8; i++)
-        target->h[i] = source->h[i];
-#pragma unroll
-    for (int i = 0; i < 32; i++)
-        target->b[i] = source->b[i];
-}
-
 ////////////////////////   Utils   ///////////////////////
 
 // convert one hex-codec char to binary
@@ -109,10 +99,10 @@ __device__ void print_hex_inverse_device(unsigned char *hex, size_t len) {
     }
 }
 
-__device__ int little_endian_bit_comparison(const unsigned char *a, const unsigned char *b, size_t byte_len) {
+__device__ int little_endian_bit_comparison(const unsigned char *a, const unsigned char *b) {
     // compared from lowest bit
-
-    for (int i = byte_len - 1; i >= 0; --i) {
+#pragma unroll 32
+    for (int i = 31; i >= 0; --i) {
         if (a[i] < b[i])
             return -1;
         else if (a[i] > b[i])
@@ -191,34 +181,26 @@ void calc_merkle_root(unsigned char *root, int count, char **branch) {
 }
 
 __global__ void solveLoop(HashBlock *blockDevice, unsigned char *target_hex, bool *isEnd) {
+    if (*isEnd)
+        return;
     int idx = blockDim.x * blockIdx.x + threadIdx.x;
     __shared__ HashBlock block[THREAD];
     __shared__ SHA256 sha256_ctx[THREAD];
+    if (*isEnd)
+        return;
     copyBlock(&block[threadIdx.x], blockDevice);
-    block[threadIdx.x].nonce = idx * loopLimit;
+    block[threadIdx.x].nonce = idx * loopLimit + 0xB0000000;
     for (WORD t = 0; t <= loopLimit; t++) {
         // sha256d
         if (*isEnd)
             break;
         double_sha256_device(&sha256_ctx[threadIdx.x], (unsigned char *)&block[threadIdx.x]);
-        /*if (block[threadIdx.x].nonce % 1000000 == 0) {
-            printf("hash #%10u (big): ", block[threadIdx.x].nonce);
-            print_hex_inverse_device(sha256_ctx.b, 32);
-            printf("\n");
-        }*/
 
-        if (little_endian_bit_comparison(sha256_ctx[threadIdx.x].b, target_hex, 32) < 0)  // sha256_ctx < target_hex
-        {
-            // printf("Found Solution!!\n");
-            // printf("hash #%10u (big): ", block[threadIdx.x].nonce);
-            // print_hex_inverse_device(sha256_ctx[threadIdx.x].b, 32);
-            // printf("\n\n");
-            // copySHA256(sha256_ctxDevice, &sha256_ctx[threadIdx.x]);
-            copyBlock(blockDevice, &block[threadIdx.x]);
+        if (little_endian_bit_comparison(sha256_ctx[threadIdx.x].b, target_hex) < 0) {
             *isEnd = true;
+            blockDevice->nonce = block[threadIdx.x].nonce;
             break;
         }
-
         block[threadIdx.x].nonce++;
     }
 }
@@ -233,14 +215,11 @@ void solve(FILE *fin, FILE *fout, int totalblock) {
     char **merkle_branch;
 
     HashBlock *blockDevice;
-    SHA256 *sha256_ctxDevice;
     unsigned char *target_hexDevice;
     bool *isEndDevice;
     cudaMalloc(&blockDevice, sizeof(HashBlock));
-    cudaMalloc(&sha256_ctxDevice, sizeof(SHA256));
     cudaMalloc(&target_hexDevice, sizeof(unsigned char) * 32);
     cudaMalloc(&isEndDevice, sizeof(bool));
-
     for (int i = 0; i < totalblock; ++i) {
         getline(version, 9, fin);
         getline(prevhash, 65, fin);
@@ -256,7 +235,6 @@ void solve(FILE *fin, FILE *fout, int totalblock) {
             getline(merkle_branch[i], 65, fin);
             merkle_branch[i][64] = '\0';
         }
-
         // **** calculate merkle root ****
 
         unsigned char merkle_root[32];
@@ -281,36 +259,27 @@ void solve(FILE *fin, FILE *fout, int totalblock) {
         unsigned int shift = 8 * (exp - 3);
         unsigned int sb = shift / 8;
         unsigned int rb = shift % 8;
-
         // little-endian
         target_hex[sb] = (mant << rb);
         target_hex[sb + 1] = (mant >> (8 - rb));
         target_hex[sb + 2] = (mant >> (16 - rb));
         target_hex[sb + 3] = (mant >> (24 - rb));
 
-
-        // ********** find nonce **************
-
-        //SHA256 sha256_ctx;
-
         bool isEnd = false;
 
         cudaMemcpy(blockDevice, &block, sizeof(HashBlock), cudaMemcpyHostToDevice);
-        // cudaMemcpy(sha256_ctxDevice, &sha256_ctx, sizeof(SHA256), cudaMemcpyHostToDevice);
         cudaMemcpy(target_hexDevice, &target_hex, sizeof(unsigned char) * 32, cudaMemcpyHostToDevice);
         cudaMemcpy(isEndDevice, &isEnd, sizeof(bool), cudaMemcpyHostToDevice);
 
         solveLoop<<<BLOCK, THREAD>>>(blockDevice, target_hexDevice, isEndDevice);
         cudaDeviceSynchronize();
-        //cudaMemcpy(&sha256_ctx, sha256_ctxDevice, sizeof(SHA256), cudaMemcpyDeviceToHost);
         cudaMemcpy(&block, blockDevice, sizeof(HashBlock), cudaMemcpyDeviceToHost);
-        
+
         for (int i = 0; i < 4; ++i) {
             fprintf(fout, "%02x", ((unsigned char *)&block.nonce)[i]);
         }
         fprintf(fout, "\n");
 
-        
         delete[] merkle_branch;
         delete[] raw_merkle_branch;
     }

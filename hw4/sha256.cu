@@ -45,14 +45,15 @@ __device__ void sha256_transform_device(SHA256 *ctx, const BYTE *msg) {
 
     // Create a 64-entry message schedule array w[0..63] of 32-bit words
     WORD w[64];
-// Copy chunk into first 16 words w[0..15] of the message schedule array
-#pragma unroll
+    // Copy chunk into first 16 words w[0..15] of the message schedule array
+
+#pragma unroll 16
     for (i = 0, j = 0; i < 16; ++i, j += 4)
         w[i] = (msg[j] << 24) | (msg[j + 1] << 16) | (msg[j + 2] << 8) | (msg[j + 3]);
 
         // Extend the first 16 words into the remaining 48 words w[16..63] of the message schedule array:
-#pragma unroll
-    for (i = 16; i < 64; ++i)
+#pragma unroll 48
+    for (; i < 64; ++i)
         w[i] = w[i - 16] + ((_rotr(w[i - 15], 7)) ^ (_rotr(w[i - 15], 18)) ^ (w[i - 15] >> 3)) + w[i - 7] + ((_rotr(w[i - 2], 17)) ^ (_rotr(w[i - 2], 19)) ^ (w[i - 2] >> 10));
 
     // Initialize working variables to current hash value
@@ -67,11 +68,10 @@ __device__ void sha256_transform_device(SHA256 *ctx, const BYTE *msg) {
 
     // Compress function main loop:
     WORD temp1, temp2;
-#pragma unroll
+#pragma unroll 64
     for (i = 0; i < 64; ++i) {
         temp1 = h + ((_rotr(e, 6)) ^ (_rotr(e, 11)) ^ (_rotr(e, 25))) + ((e & f) ^ ((~e) & g)) + k_device[i] + w[i];
         temp2 = ((_rotr(a, 2)) ^ (_rotr(a, 13)) ^ (_rotr(a, 22))) + ((a & b) ^ (a & c) ^ (b & c));
-
         h = g;
         g = f;
         f = e;
@@ -102,10 +102,11 @@ __device__ void sha256_device(SHA256 *ctx, const BYTE *msg, size_t len) {
 
     // Process the message in successive 512-bit chunks
     // For each chunk:
-#pragma unroll
+#pragma unroll 8
     for (i = 0; i < 8; i++)
         ctx->h[i] = h_device[i];
 
+#pragma unroll
     for (i = 0; i < total_len; i += 64) {
         sha256_transform_device(ctx, &msg[i]);
     }
@@ -123,7 +124,7 @@ __device__ void sha256_device(SHA256 *ctx, const BYTE *msg, size_t len) {
     if (j > 56) {
         sha256_transform_device(ctx, m);
         memset(m, 0, sizeof(m));
-        // printf("true\n");
+        printf("true\n");
     }
 
     // Append L as a 64-bit bug-endian integer, making the total post-processed length a multiple of 512 bits
@@ -140,7 +141,7 @@ __device__ void sha256_device(SHA256 *ctx, const BYTE *msg, size_t len) {
 
 // Produce the final hash value (little-endian to big-endian)
 // Swap 1st & 4th, 2nd & 3rd byte for each word
-#pragma unroll
+#pragma unroll 8
     for (i = 0; i < 32; i += 4) {
         _swap(ctx->b[i], ctx->b[i + 3]);
         _swap(ctx->b[i + 1], ctx->b[i + 2]);
