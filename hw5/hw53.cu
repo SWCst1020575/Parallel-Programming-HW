@@ -6,27 +6,11 @@
 #include <stdexcept>
 #include <string>
 #include <vector>
-#define BLOCK 128
+
+#define BLOCK 8
 #define THREAD 1024
-#if !defined(__CUDA_ARCH__) || __CUDA_ARCH__ >= 600
-#else
-__device__ double atomicAdd(double* address, double val) {
-    unsigned long long int* address_as_ull =
-        (unsigned long long int*)address;
-    unsigned long long int old = *address_as_ull, assumed;
+#define SIZE 1024
 
-    do {
-        assumed = old;
-        old = atomicCAS(address_as_ull, assumed,
-                        __double_as_longlong(val +
-                                             __longlong_as_double(assumed)));
-
-        // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
-    } while (assumed != old);
-
-    return __longlong_as_double(old);
-}
-#endif
 __constant__ const int n_steps = 200000;
 __constant__ const double dt = 60;
 __constant__ const double eps = 1e-3;
@@ -68,97 +52,58 @@ void write_output(const char* filename, double min_dist, int hit_time_step,
          << gravity_device_id << ' ' << missile_cost << '\n';
 }
 
-__global__ void run_step(bool isDeviceG, int step, int n,
+__device__ void run_step(int step, int n, int i, int j,
                          double* qx, double* qy, double* qz,
+                         double* vx, double* vy, double* vz,
                          double* ax, double* ay, double* az,
-                         double* m, const char* type) {
+                         const double* m, const char* type) {
     // compute accelerations
-    __shared__ double m_shared[THREAD];
-    __shared__ double ax_shared[THREAD];
-    __shared__ double ay_shared[THREAD];
-    __shared__ double az_shared[THREAD];
-    __shared__ double x, y, z;
-    if (threadIdx.x < n) {
-        if (!isDeviceG && type[threadIdx.x] == 5)
-            m[threadIdx.x] = 0;
-        m_shared[threadIdx.x] = (type[threadIdx.x] == 5) ? gravity_device_mass(m[threadIdx.x], step * dt) : m[threadIdx.x];
-        ax_shared[threadIdx.x] = 0;
-        ay_shared[threadIdx.x] = 0;
-        az_shared[threadIdx.x] = 0;
-        x = 0, y = 0, z = 0;
-    }
-    if (threadIdx.x < n && blockIdx.x == 0) {
-        ax[threadIdx.x] = 0;
-        ay[threadIdx.x] = 0;
-        az[threadIdx.x] = 0;
-    }
-    __syncthreads();
-    for (int i = blockIdx.x; i < n; i += BLOCK) {
-        for (int j = threadIdx.x; j < n; j += THREAD) {
-            if (j == i) continue;
-            double dx = qx[j] - qx[i];
-            double dy = qy[j] - qy[i];
-            double dz = qz[j] - qz[i];
-            double dist3 =
-                pow(dx * dx + dy * dy + dz * dz + eps * eps, 1.5);
-            /* atomicAdd(&ax[i], G * m_shared[j] * dx / dist3);
-            atomicAdd(&ay[i], G * m_shared[j] * dy / dist3);
-            atomicAdd(&az[i], G * m_shared[j] * dz / dist3); */
-            x += G * m_shared[j] * dx / dist3;
-            y += G * m_shared[j] * dy / dist3;
-            z += G * m_shared[j] * dz / dist3;
+
+    if (j == i) return;
+    double mj = m[j];
+    if (type[j] == 5 && mj > 0)
+        mj = gravity_device_mass(mj, step * dt);
+    double dx = qx[j] - qx[i];
+    double dy = qy[j] - qy[i];
+    double dz = qz[j] - qz[i];
+    double dist3 =
+        pow(dx * dx + dy * dy + dz * dz + eps * eps, 1.5);
+    ax[i] += G * mj * dx / dist3;
+    ay[i] += G * mj * dy / dist3;
+    az[i] += G * mj * dz / dist3;
+}
+__global__ void problem1(int curStep, int n, int planet, int asteroid, double* min_dist,
+                         double* qx, double* qy, double* qz,
+                         double* vx, double* vy, double* vz,
+                         double* m, char* type) {
+    __shared__ double ax[THREAD];
+    __shared__ double ay[THREAD];
+    __shared__ double az[THREAD];
+    int step = curStep + blockIdx.x;
+    int i = threadIdx.x;
+    if (i < n) {
+        ax[i] = 0;
+        ay[i] = 0;
+        az[i] = 0;
+        for (int j = 0; j < n; j++)
+            run_step(step, n, i, j, qx, qy, qz, vx, vy, vz, ax, ay, az, m, type);
+        // update velocities
+        vx[i] += ax[i] * dt;
+        vy[i] += ay[i] * dt;
+        vz[i] += az[i] * dt;
+
+        // update positions
+        qx[i] += vx[i] * dt;
+        qy[i] += vy[i] * dt;
+        qz[i] += vz[i] * dt;
+        __syncthreads();
+        // run_step(step, n, qx, qy, qz, vx, vy, vz, m, type);
+        if (i == 0) {
+            double dx = qx[planet] - qx[asteroid];
+            double dy = qy[planet] - qy[asteroid];
+            double dz = qz[planet] - qz[asteroid];
+            *min_dist = MIN(*min_dist, sqrt(dx * dx + dy * dy + dz * dz));
         }
-    }
-    __syncthreads();
-    if (blockIdx.x < n && threadIdx.x == 0) {
-        atomicAdd(&ax[blockIdx.x], x);
-        atomicAdd(&ay[blockIdx.x], y);
-        atomicAdd(&az[blockIdx.x], z);
-        /* ax[blockIdx.x] += x;
-        ay[blockIdx.x] += y;
-        az[blockIdx.x] += z; */
-    }
-    __syncthreads();
-}
-__global__ void problem1Update(double* qx, double* qy, double* qz,
-                               double* vx, double* vy, double* vz,
-                               double* ax, double* ay, double* az,
-                               int planet, int asteroid, double* min_dist) {
-    // update positions
-    vx[threadIdx.x] += ax[threadIdx.x] * dt;
-    vy[threadIdx.x] += ay[threadIdx.x] * dt;
-    vz[threadIdx.x] += az[threadIdx.x] * dt;
-
-    qx[threadIdx.x] += vx[threadIdx.x] * dt;
-    qy[threadIdx.x] += vy[threadIdx.x] * dt;
-    qz[threadIdx.x] += vz[threadIdx.x] * dt;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        double dx = qx[planet] - qx[asteroid];
-        double dy = qy[planet] - qy[asteroid];
-        double dz = qz[planet] - qz[asteroid];
-        *min_dist = MIN(*min_dist, sqrt(dx * dx + dy * dy + dz * dz));
-    }
-}
-__global__ void problem2Update(double* qx, double* qy, double* qz,
-                               double* vx, double* vy, double* vz,
-                               double* ax, double* ay, double* az,
-                               int planet, int asteroid, int* hit_time_step, int step) {
-    // update positions
-    vx[threadIdx.x] += ax[threadIdx.x] * dt;
-    vy[threadIdx.x] += ay[threadIdx.x] * dt;
-    vz[threadIdx.x] += az[threadIdx.x] * dt;
-
-    qx[threadIdx.x] += vx[threadIdx.x] * dt;
-    qy[threadIdx.x] += vy[threadIdx.x] * dt;
-    qz[threadIdx.x] += vz[threadIdx.x] * dt;
-    __syncthreads();
-    if (threadIdx.x == 0) {
-        double dx = qx[planet] - qx[asteroid];
-        double dy = qy[planet] - qy[asteroid];
-        double dz = qz[planet] - qz[asteroid];
-        if (dx * dx + dy * dy + dz * dz < planet_radius * planet_radius)
-            *hit_time_step = step;
     }
 }
 void setBody(double* qx, double* qy, double* qz,
@@ -195,7 +140,6 @@ int main(int argc, char** argv) {
     int n, planet, asteroid;
     // std::vector<double> qx, qy, qz, vx, vy, vz, m;
     double *qx, *qy, *qz, *vx, *vy, *vz, *m;
-    double *ax, *ay, *az;
     std::vector<double> temp_qx, temp_qy, temp_qz, temp_vx, temp_vy, temp_vz, temp_m;
     std::vector<std::string> temp_type;
     std::vector<char> type;
@@ -215,30 +159,24 @@ int main(int argc, char** argv) {
     cudaMalloc(&vx, sizeof(double) * n);
     cudaMalloc(&vy, sizeof(double) * n);
     cudaMalloc(&vz, sizeof(double) * n);
-    cudaMalloc(&ax, sizeof(double) * n);
-    cudaMalloc(&ay, sizeof(double) * n);
-    cudaMalloc(&az, sizeof(double) * n);
     cudaMalloc(&m, sizeof(double) * n);
     cudaMalloc(&typeDevice, sizeof(char) * n);
     cudaMemcpy(typeDevice, &type[0], sizeof(char) * type.size(), cudaMemcpyHostToDevice);
-
+    for (int i = 0; i < n; i++)
+        if (type[i] == 5)
+            temp_m[i] = 0;
     setBody(qx, qy, qz, vx, vy, vz, m, temp_qx, temp_qy, temp_qz, temp_vx, temp_vy, temp_vz, temp_m);
     //  Problem 1
     double min_dist = std::numeric_limits<double>::infinity();
     double* min_dist_device;
-    int hit_time_step = -2;
-    int* hit_time_step_device;
     cudaMalloc(&min_dist_device, sizeof(double));
-    cudaMalloc(&hit_time_step_device, sizeof(int));
     cudaMemcpy(min_dist_device, &min_dist, sizeof(double), cudaMemcpyHostToDevice);
-    cudaMemcpy(hit_time_step_device, &hit_time_step, sizeof(int), cudaMemcpyHostToDevice);
-    for (int step = 0; step <= n_steps; step++) {
-        run_step<<<BLOCK, THREAD>>>(false, step, n, qx, qy, qz, ax, ay, az, m, typeDevice);
-        cudaDeviceSynchronize();
-        problem1Update<<<1, n>>>(qx, qy, qz, vx, vy, vz, ax, ay, az, planet, asteroid, min_dist_device);
-
+    int hit_time_step = -2;
+    for (int step = 0; step <= n_steps; step += BLOCK) {
+        problem1<<<BLOCK, THREAD>>>(step, n, planet, asteroid, min_dist_device, qx, qy, qz, vx, vy, vz, m, typeDevice);
         cudaDeviceSynchronize();
     }
+
     cudaMemcpy(&min_dist, min_dist_device, sizeof(double), cudaMemcpyDeviceToHost);
     // Problem 2
 
